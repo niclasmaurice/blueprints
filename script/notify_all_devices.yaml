@@ -1,0 +1,57 @@
+blueprint:
+  name: Benachrichtigung an alle Geräte
+  description: Sendet eine Benachrichtigung an mehrere Geräte gleichzeitig.
+  domain: script
+  input:
+    notify_service_1:
+      name: Benachrichtigungsdienst 1
+      description: Der erste Benachrichtigungsdienst (z.B. notify.mobile_app_iphone)
+      selector:
+        text:
+    notify_service_2:
+      name: Benachrichtigungsdienst 2 (Optional)
+      description: Der zweite Benachrichtigungsdienst (optional)
+      default: ""
+      selector:
+        text:
+    notify_service_3:
+      name: Benachrichtigungsdienst 3 (Optional)
+      description: Der dritte Benachrichtigungsdienst (optional)
+      default: ""
+      selector:
+        text:
+    notification_title:
+      name: Titel
+      description: Der Titel der Benachrichtigung
+      selector:
+        text:
+    notification_message:
+      name: Nachricht
+      description: Die Nachricht der Benachrichtigung
+      selector:
+        text:
+          multiline: true
+
+sequence:
+  - service: !input notify_service_1
+    data:
+      title: !input notification_title
+      message: !input notification_message
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_service_2 != '' }}"
+        sequence:
+          - service: !input notify_service_2
+            data:
+              title: !input notification_title
+              message: !input notification_message
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ notify_service_3 != '' }}"
+        sequence:
+          - service: !input notify_service_3
+            data:
+              title: !input notification_title
+              message: !input notification_message
