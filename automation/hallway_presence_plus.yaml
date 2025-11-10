@@ -1,10 +1,10 @@
 blueprint:
-  name: Flur – Bewegung + Präsenz (Meross) + Zeit-Helligkeit
+  name: Flur – Bewegung + Präsenz (Meross) + Zeit-Helligkeit + Distanz
   description: >
     Schaltet das Licht bei Bewegung/Präsenz ein und hält es an, solange Präsenz erkannt wird.
     Schaltet erst aus, wenn Präsenz UND Bewegung für eine einstellbare Zeit abwesend sind.
     Optional nur bei Dunkelheit (Sonne oder Lux). Mit Sperre (Bypass).
-    NEU: Helligkeit je nach Uhrzeit (keine/fest/Zeitprofil).
+    Zusätzlich: Helligkeit je nach Uhrzeit; Einschalten erst wenn Distanz < Schwelle (optional).
   domain: automation
   input:
     motion_sensor:
@@ -13,13 +13,11 @@ blueprint:
       selector:
         entity:
           domain: binary_sensor
-          device_class:
-            - motion
-            - occupancy
+          device_class: [motion, occupancy]
 
     presence_sensor:
       name: Präsenzsensor (numerisch)
-      description: "Numerischer Präsenz-Wert (Meross: 1 = niemand, 2/… = anwesend)."
+      description: "Numerischer Präsenz-Wert (Meross)."
       selector:
         entity:
           domain: sensor
@@ -62,12 +60,9 @@ blueprint:
       selector:
         select:
           options:
-            - label: Keine
-              value: none
-            - label: Sonne unter Horizont
-              value: sun
-            - label: Lux unter Schwelle
-              value: lux
+            - { label: "Keine", value: none }
+            - { label: "Sonne unter Horizont", value: sun }
+            - { label: "Lux unter Schwelle", value: lux }
 
     illuminance_sensor:
       name: Helligkeitssensor (Lux, optional – nur wenn „Lux unter Schwelle“)
@@ -75,8 +70,7 @@ blueprint:
       selector:
         entity:
           domain: sensor
-          device_class:
-            - illuminance
+          device_class: [illuminance]
 
     illuminance_below:
       name: Lux-Schwelle
@@ -96,7 +90,7 @@ blueprint:
         entity:
           domain: input_boolean
 
-    # --- Neu: Helligkeit nach Uhrzeit ---
+    # --- Helligkeit nach Uhrzeit ---
     brightness_mode:
       name: Helligkeitsmodus
       description: "Keine Vorgabe, fester Wert oder Zeitprofil (Morgen/Tag/Abend/Nacht)"
@@ -119,18 +113,15 @@ blueprint:
           step: 1
           unit_of_measurement: "%"
 
-    # Zeitprofil – Uhrzeiten & Helligkeiten
     time_morning_start:
       name: Morgen – Start
       default: "06:30:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     time_morning_end:
       name: Morgen – Ende
       default: "09:30:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     brightness_morning_pct:
       name: Morgen – Helligkeit (%)
@@ -145,14 +136,12 @@ blueprint:
     time_day_start:
       name: Tag – Start
       default: "09:30:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     time_day_end:
       name: Tag – Ende
       default: "18:00:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     brightness_day_pct:
       name: Tag – Helligkeit (%)
@@ -167,14 +156,12 @@ blueprint:
     time_evening_start:
       name: Abend – Start
       default: "18:00:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     time_evening_end:
       name: Abend – Ende
       default: "22:00:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     brightness_evening_pct:
       name: Abend – Helligkeit (%)
@@ -189,14 +176,12 @@ blueprint:
     time_night_start:
       name: Nacht – Start
       default: "22:00:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     time_night_end:
       name: Nacht – Ende
       default: "06:30:00"
-      selector:
-        time: {}
+      selector: { time: {} }
 
     brightness_night_pct:
       name: Nacht – Helligkeit (%)
@@ -207,6 +192,37 @@ blueprint:
           max: 100
           step: 1
           unit_of_measurement: "%"
+
+    # --- Distanz-Gate (optional) ---
+    distance_sensor:
+      name: Distanzsensor (optional)
+      description: "Numerischer Abstand, z. B. Meross „Presence distance“."
+      default: []
+      selector:
+        entity:
+          domain: sensor
+
+    distance_turn_on_below_m:
+      name: Einschalten erst unter Distanz (m)
+      description: "Lampe erst einschalten, wenn Distanz < X m liegt."
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 0.1
+          unit_of_measurement: m
+
+    distance_wait_timeout_s:
+      name: Maximale Wartezeit auf Distanz (Sek.)
+      description: "Wie lange auf Distanz < X m warten, bevor abgebrochen wird."
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          unit_of_measurement: s
 
 mode: restart
 max_exceeded: silent
@@ -225,46 +241,47 @@ variables:
   # Zeit-Helligkeit
   v_bright_mode: !input brightness_mode
   v_bright_fixed: !input brightness_fixed_pct
-
   v_t_mo_s: !input time_morning_start
   v_t_mo_e: !input time_morning_end
   v_b_mo: !input brightness_morning_pct
-
   v_t_da_s: !input time_day_start
   v_t_da_e: !input time_day_end
   v_b_da: !input brightness_day_pct
-
   v_t_ev_s: !input time_evening_start
   v_t_ev_e: !input time_evening_end
   v_b_ev: !input brightness_evening_pct
-
   v_t_ni_s: !input time_night_start
   v_t_ni_e: !input time_night_end
   v_b_ni: !input brightness_night_pct
 
-  # Helper: Prüft, ob "jetzt" innerhalb eines Start/End-Fensters liegt (auch über Mitternacht)
+  # Distanz
+  v_d_entity: !input distance_sensor
+  v_d_thresh_m: !input distance_turn_on_below_m
+  v_d_wait_s: !input distance_wait_timeout_s
+
+  # Zeit-Fenster inkl. über Mitternacht
   in_window_mo: >
     {% set now_ts = as_timestamp(now()) %}
     {% set s = as_timestamp(today_at(v_t_mo_s)) %}
     {% set e = as_timestamp(today_at(v_t_mo_e)) %}
-    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+    {{ (s <= e and s <= now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
   in_window_da: >
     {% set now_ts = as_timestamp(now()) %}
     {% set s = as_timestamp(today_at(v_t_da_s)) %}
     {% set e = as_timestamp(today_at(v_t_da_e)) %}
-    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+    {{ (s <= e and s <= now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
   in_window_ev: >
     {% set now_ts = as_timestamp(now()) %}
     {% set s = as_timestamp(today_at(v_t_ev_s)) %}
     {% set e = as_timestamp(today_at(v_t_ev_e)) %}
-    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+    {{ (s <= e and s <= now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
   in_window_ni: >
     {% set now_ts = as_timestamp(now()) %}
     {% set s = as_timestamp(today_at(v_t_ni_s)) %}
     {% set e = as_timestamp(today_at(v_t_ni_e)) %}
-    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+    {{ (s <= e and s <= now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
 
-  # Ergebnis-Helligkeit jetzt
+  # Ergebnis-Helligkeit
   v_brightness_now: >
     {% if v_bright_mode == 'fixed' %}
       {{ v_bright_fixed | int }}
@@ -273,11 +290,31 @@ variables:
       {% elif in_window_da %} {{ v_b_da | int }}
       {% elif in_window_ev %} {{ v_b_ev | int }}
       {% elif in_window_ni %} {{ v_b_ni | int }}
-      {% else %} {{ v_b_da | int }} {# Fallback: Tag #}
+      {% else %} {{ v_b_da | int }}
       {% endif %}
     {% else %}
       {{ 0 }}
     {% endif %}
+
+  # Distanz-Auswertung (in Meter normalisiert)
+  s_distance_available: >
+    {{ not (v_d_entity in [None, '', []]) and (states.get(v_d_entity) is not none) }}
+  s_distance_m: >
+    {% if not (not (v_d_entity in [None, '', []]) or (states.get(v_d_entity) is none)) %}
+      9999
+    {% else %}
+      {% set raw = states(v_d_entity) | float(9999) %}
+      {% set u = (state_attr(v_d_entity, 'unit_of_measurement') or '') | lower %}
+      {% if u in ['m', 'meter', 'meters'] %}
+        {{ raw }}
+      {% elif u in ['cm', 'centimeter', 'centimeters'] %}
+        {{ raw / 100 }}
+      {% else %}
+        {{ raw }}  {# Fallback: annehmen m #}
+      {% endif %}
+    {% endif %}
+  s_distance_ok: >
+    {{ (not s_distance_available) or (s_distance_m < (v_d_thresh_m | float(5))) }}
 
 trigger:
   - platform: state
@@ -288,14 +325,14 @@ trigger:
     above: !input presence_active_threshold
 
 condition:
-  # Sperre (optional)
+  # Bypass
   - condition: template
     value_template: >
       {% if v_bypass in [None, '', []] %} true
       {% else %} {{ is_state(v_bypass, 'off') }}
       {% endif %}
 
-  # Dunkelheitsbedingung beim Einschalten
+  # Dunkelheit
   - condition: template
     value_template: >
       {% if v_dark_mode == 'none' %}
@@ -311,7 +348,16 @@ condition:
       {% endif %}
 
 action:
-  # Einschalten (mit optionaler Helligkeit je Modus)
+  # Optional warten, bis Distanz < Schwelle (nur wenn Sensor gesetzt)
+  - choose:
+      - conditions: "{{ s_distance_available and not s_distance_ok }}"
+        sequence:
+          - wait_template: "{{ s_distance_ok }}"
+            timeout: "00:00:{{ v_d_wait_s | int }}"
+            continue_on_timeout: false
+    default: []
+
+  # Einschalten (mit optionaler Helligkeit nach Modus)
   - service: light.turn_on
     target:
       entity_id: !input target_lights
