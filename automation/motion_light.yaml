@@ -1,0 +1,46 @@
+blueprint:
+  name: Bewegungsgesteuertes Licht
+  description: Schaltet ein Licht ein, wenn eine Bewegung erkannt wird, und schaltet es nach einer bestimmten Zeit wieder aus.
+  domain: automation
+  input:
+    motion_entity:
+      name: Bewegungsmelder
+      description: Der Bewegungsmelder, der die Automatisierung auslöst
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: motion
+    light_target:
+      name: Licht
+      description: Das Licht, das eingeschaltet werden soll
+      selector:
+        target:
+          entity:
+            domain: light
+    no_motion_wait:
+      name: Wartezeit
+      description: Zeit in Sekunden, die gewartet wird, bevor das Licht ausgeschaltet wird
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: seconds
+
+trigger:
+  - platform: state
+    entity_id: !input motion_entity
+    from: "off"
+    to: "on"
+
+action:
+  - service: light.turn_on
+    target: !input light_target
+  - wait_for_trigger:
+      - platform: state
+        entity_id: !input motion_entity
+        from: "on"
+        to: "off"
+  - delay: !input no_motion_wait
+  - service: light.turn_off
+    target: !input light_target
