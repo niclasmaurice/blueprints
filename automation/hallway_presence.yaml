@@ -18,7 +18,7 @@ blueprint:
     presence_sensor:
       name: Präsenzsensor (numerisch)
       description: >
-        Numerischer Präsenz-Wert (Meross: 0 = niemand, 1/2/… = anwesend).
+        Numerischer Präsenz-Wert (Meross: 1 = niemand, 2/… = anwesend).
       selector:
         entity:
           domain: sensor
