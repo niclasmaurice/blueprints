@@ -15,10 +15,10 @@ blueprint:
       description: "Binary-Sensoren (motion/occupancy). Leer lassen, wenn nicht genutzt."
       default: []
       selector:
-        target:
-          entity:
-            domain:
-              - light
+        entity:
+          domain: binary_sensor
+          device_class: [motion, occupancy]
+          multiple: true
 
     contact_sensors:
       name: Tür-/Fensterkontakte (optional)
@@ -142,10 +142,13 @@ blueprint:
 
     # --- Ziel & Verhalten ---
     lights:
-      name: Ziel (Area/Device/Entity)
-      description: "Licht(er) / Gruppe wählen."
+      name: Ziel (Licht)
+      description: "Wähle die(n) Light-Entity oder eine Light-Gruppe."
       selector:
-        target: {}
+        target:
+          entity:
+            domain:
+              - light
 
     use_brightness:
       name: Helligkeit beim Einschalten setzen?
@@ -489,17 +492,15 @@ action:
 
   # --- Mindest-Einschaltzeit sicherstellen (Anti-Flackern) ---
   - variables:
-      _ents: "{{ (expand(cfg_lights.entity_id | default([])) | map(attribute='entity_id') | list) }}"
-      _earliest_on_ts: >
-        {% set on_ts = _ents
-           | map('states')
-           | selectattr('state','eq','on')
-           | map(attribute='last_changed')
-           | map('as_timestamp')
-           | list %}
-        {{ (on_ts | min(default=as_timestamp(now()))) }}
+      _on_ts_min: >
+        {% set st = expand(cfg_lights.entity_id | default([]))
+            | selectattr('state','eq','on')
+            | map(attribute='last_changed')
+            | map('as_timestamp')
+            | list %}
+        {{ (st|min if st|length>0 else as_timestamp(now())) }}
       _remain: >
-        {% set since = (as_timestamp(now()) - _earliest_on_ts) | int(0) %}
+        {% set since = (as_timestamp(now()) - _on_ts_min) | int(0) %}
         {% set need = cfg_min_on | int(0) %}
         {{ [0, need - since] | max | int }}
   - choose:
