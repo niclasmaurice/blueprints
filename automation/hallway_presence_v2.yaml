@@ -15,10 +15,10 @@ blueprint:
       description: "Binary-Sensoren (motion/occupancy). Leer lassen, wenn nicht genutzt."
       default: []
       selector:
-        entity:
-          domain: binary_sensor
-          device_class: [motion, occupancy]
-          multiple: true
+        target:
+          entity:
+            domain:
+              - light
 
     contact_sensors:
       name: Tür-/Fensterkontakte (optional)
