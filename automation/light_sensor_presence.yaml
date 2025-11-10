@@ -1,0 +1,412 @@
+blueprint:
+  name: Flurlicht – Präsenz, Bewegung & Kontakt (flexibel)
+  description: >
+    Steuere das Flurlicht flexibel über Bewegung, Präsenz- und Kontaktsensoren
+    mit Dunkelheitsprüfung, Bypass und konfigurierbarem Ausschaltverhalten.
+  domain: automation
+  source_url: https://example.com/blueprints/flurlicht-praesenz-bewegung-kontakt
+  input:
+    cfg_light_target:
+      name: Licht
+      description: Wähle das zu steuernde Licht oder die Lichtergruppe.
+      selector:
+        target:
+          entity:
+            domain: light
+    cfg_motion_sensor:
+      name: Bewegungssensor
+      description: Optionaler Bewegungssensor (binary_sensor, "on" bei Bewegung).
+      default:
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - motion
+            - occupancy
+    cfg_presence_sensor:
+      name: Präsenzsensor
+      description: Optionaler Präsenzwert (numerisch, z. B. Meross).
+      default:
+      selector:
+        entity:
+          domain:
+            - sensor
+            - number
+    cfg_presence_threshold:
+      name: Präsenzschwelle
+      description: Aktive Präsenz ab diesem Wert (nur wenn Präsenzsensor gesetzt).
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 1000
+          unit_of_measurement: ''
+          mode: box
+    cfg_contact_sensors:
+      name: Kontakte
+      description: Optionale Tür-/Fensterkontakte (binary_sensor, "on"/"open" = offen).
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+          device_class:
+            - door
+            - window
+            - opening
+            - garage_door
+    cfg_on_logic:
+      name: AN-Logik
+      description: Bestimme, welche Sensoren das Licht einschalten dürfen.
+      default: any
+      selector:
+        select:
+          options:
+            - value: any
+              label: Bewegung ODER Präsenz ODER Kontakt
+            - value: all
+              label: (Bewegung ODER Kontakt) UND Präsenz
+            - value: motion_only
+              label: Nur Bewegung
+            - value: presence_only
+              label: Nur Präsenz
+            - value: contact_only
+              label: Nur Kontakt(e)
+    cfg_off_logic:
+      name: AUS-Logik
+      description: Bedingung, wann Abwesenheit erkannt wird.
+      default: both_absent
+      selector:
+        select:
+          options:
+            - value: both_absent
+              label: Bewegung AUS UND Präsenz unter Schwelle
+            - value: presence_only
+              label: Nur Präsenz unter Schwelle
+            - value: motion_only
+              label: Nur Bewegung AUS
+            - value: either_absent
+              label: Bewegung AUS ODER Präsenz unter Schwelle
+    cfg_off_delay:
+      name: Verzögerung AUS (Sekunden)
+      description: Zeit, die die AUS-Bedingungen ununterbrochen erfüllt sein müssen.
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 3600
+          unit_of_measurement: s
+          mode: box
+    cfg_off_require_contacts_closed:
+      name: Kontakte müssen geschlossen sein
+      description: Zum Ausschalten müssen zusätzlich alle Kontakte geschlossen sein.
+      default: false
+      selector:
+        boolean:
+    cfg_off_allow_contacts_closed_as_or:
+      name: Kontakte-OR für AUS erlauben
+      description: Auch ausschalten, sobald alle Kontakte geschlossen sind.
+      default: false
+      selector:
+        boolean:
+    cfg_dark_mode:
+      name: Dunkelheitslogik
+      description: Begrenze das Einschalten auf Dunkelheit.
+      default: none
+      selector:
+        select:
+          options:
+            - value: none
+              label: Keine Prüfung
+            - value: sun
+              label: Sonne unter dem Horizont
+            - value: lux
+              label: Lux-Sensor unter Schwelle
+    cfg_lux_sensor:
+      name: Lux-Sensor
+      description: Lux-Sensor (erforderlich bei Dunkelheitslogik = Lux).
+      default:
+      selector:
+        entity:
+          domain:
+            - sensor
+            - number
+    cfg_lux_threshold:
+      name: Lux-Schwelle
+      description: Maximale Beleuchtungsstärke für die Lux-Prüfung.
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 10000
+          unit_of_measurement: lx
+          mode: box
+    cfg_bypass:
+      name: Bypass
+      description: Optionaler Schalter, der die Automation deaktiviert, wenn EIN.
+      default:
+      selector:
+        entity:
+          domain: input_boolean
+    cfg_brightness_pct:
+      name: Helligkeit (%)
+      description: Optionale Helligkeit für das Einschalten.
+      default:
+      selector:
+        number:
+          min: 1
+          max: 100
+          mode: slider
+          unit_of_measurement: '%'
+    cfg_transition_on:
+      name: Einschalt-Transition (s)
+      description: Optionale Transition für das Einschalten.
+      default:
+      selector:
+        number:
+          min: 0
+          max: 60
+          mode: slider
+          unit_of_measurement: s
+    cfg_transition_off:
+      name: Ausschalt-Transition (s)
+      description: Optionale Transition für das Ausschalten.
+      default:
+      selector:
+        number:
+          min: 0
+          max: 60
+          mode: slider
+          unit_of_measurement: s
+
+mode: restart
+max_exceeded: silent
+
+trigger_variables:
+  cfg_motion_sensor: !input cfg_motion_sensor
+  cfg_contact_sensors: !input cfg_contact_sensors
+
+trigger:
+  - platform: template
+    value_template: >
+      {% set motion = cfg_motion_sensor %}
+      {% if motion %}
+        {{ is_state(motion, 'on') or is_state(motion, 'open') or is_state(motion, 'detected') }}
+      {% else %}
+        False
+      {% endif %}
+  - platform: template
+    value_template: >
+      {% set contacts = expand(cfg_contact_sensors | default([])) %}
+      {% if contacts | length == 0 %}
+        False
+      {% else %}
+        {% set ns = namespace(open=false) %}
+        {% for ent in contacts %}
+          {% if ent.state in ['on', 'open', 'detected', 'true'] %}
+            {% set ns.open = true %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.open }}
+      {% endif %}
+
+variables:
+  cfg_light_target: !input cfg_light_target
+  cfg_motion_sensor: !input cfg_motion_sensor
+  cfg_presence_sensor: !input cfg_presence_sensor
+  cfg_presence_threshold: !input cfg_presence_threshold
+  cfg_contact_sensors: !input cfg_contact_sensors
+  cfg_on_logic: !input cfg_on_logic
+  cfg_off_logic: !input cfg_off_logic
+  cfg_off_delay: !input cfg_off_delay
+  cfg_off_require_contacts_closed: !input cfg_off_require_contacts_closed
+  cfg_off_allow_contacts_closed_as_or: !input cfg_off_allow_contacts_closed_as_or
+  cfg_dark_mode: !input cfg_dark_mode
+  cfg_lux_sensor: !input cfg_lux_sensor
+  cfg_lux_threshold: !input cfg_lux_threshold
+  cfg_bypass: !input cfg_bypass
+  cfg_brightness_pct: !input cfg_brightness_pct
+  cfg_transition_on: !input cfg_transition_on
+  cfg_transition_off: !input cfg_transition_off
+  s_has_motion: "{{ cfg_motion_sensor is not none }}"
+  s_has_presence: "{{ cfg_presence_sensor is not none }}"
+  s_has_contacts: "{{ (cfg_contact_sensors | default([])) | length > 0 }}"
+  s_motion_active: >
+    {% if cfg_motion_sensor %}
+      {{ is_state(cfg_motion_sensor, 'on') or is_state(cfg_motion_sensor, 'open') or is_state(cfg_motion_sensor, 'detected') }}
+    {% else %}
+      False
+    {% endif %}
+  s_presence_value: >
+    {% if cfg_presence_sensor %}
+      {{ states(cfg_presence_sensor) | float(0) }}
+    {% else %}
+      0
+    {% endif %}
+  s_presence_active: >
+    {% if cfg_presence_sensor %}
+      {{ (states(cfg_presence_sensor) | float(0)) >= (cfg_presence_threshold | float(0)) }}
+    {% else %}
+      False
+    {% endif %}
+  s_any_contact_open: >
+    {% set ns = namespace(open=false) %}
+    {% for ent in expand(cfg_contact_sensors | default([])) %}
+      {% if ent.state in ['on', 'open', 'detected', 'true'] %}
+        {% set ns.open = true %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.open }}
+  s_all_contacts_closed: >
+    {% set contacts = expand(cfg_contact_sensors | default([])) %}
+    {% if contacts | length == 0 %}
+      True
+    {% else %}
+      {% set ns = namespace(open=false) %}
+      {% for ent in contacts %}
+        {% if ent.state in ['on', 'open', 'detected', 'true'] %}
+          {% set ns.open = true %}
+        {% endif %}
+      {% endfor %}
+      {{ not ns.open }}
+    {% endif %}
+  s_dark_allows_on: >
+    {% if cfg_dark_mode == 'none' %}
+      True
+    {% elif cfg_dark_mode == 'sun' %}
+      {{ is_state('sun.sun', 'below_horizon') }}
+    {% elif cfg_dark_mode == 'lux' and cfg_lux_sensor %}
+      {{ (states(cfg_lux_sensor) | float(0)) <= (cfg_lux_threshold | float(0)) }}
+    {% else %}
+      False
+    {% endif %}
+  s_should_turn_on: >
+    {% set motion = (cfg_motion_sensor is not none) and (is_state(cfg_motion_sensor, 'on') or is_state(cfg_motion_sensor, 'open') or is_state(cfg_motion_sensor, 'detected')) %}
+    {% set presence = (cfg_presence_sensor is not none) and ((states(cfg_presence_sensor) | float(0)) >= (cfg_presence_threshold | float(0))) %}
+    {% set contact = namespace(open=false) %}
+    {% for ent in expand(cfg_contact_sensors | default([])) %}
+      {% if ent.state in ['on', 'open', 'detected', 'true'] %}
+        {% set contact.open = true %}
+      {% endif %}
+    {% endfor %}
+    {% if cfg_on_logic == 'any' %}
+      {{ motion or presence or contact.open }}
+    {% elif cfg_on_logic == 'all' %}
+      {{ (motion or contact.open) and presence }}
+    {% elif cfg_on_logic == 'motion_only' %}
+      {{ motion }}
+    {% elif cfg_on_logic == 'presence_only' %}
+      {{ presence }}
+    {% elif cfg_on_logic == 'contact_only' %}
+      {{ contact.open }}
+    {% else %}
+      False
+    {% endif %}
+  s_effective_off_logic: >
+    {% if (cfg_off_require_contacts_closed or cfg_off_allow_contacts_closed_as_or) and not ((cfg_contact_sensors | default([])) | length > 0) %}
+      both_absent
+    {% else %}
+      {{ cfg_off_logic }}
+    {% endif %}
+  s_off_base_condition: >
+    {% set motion_clear = not ((cfg_motion_sensor is not none) and (is_state(cfg_motion_sensor, 'on') or is_state(cfg_motion_sensor, 'open') or is_state(cfg_motion_sensor, 'detected'))) %}
+    {% set presence_clear = not ((cfg_presence_sensor is not none) and ((states(cfg_presence_sensor) | float(0)) >= (cfg_presence_threshold | float(0)))) %}
+    {% set contact_ns = namespace(open=false) %}
+    {% for ent in expand(cfg_contact_sensors | default([])) %}
+      {% if ent.state in ['on', 'open', 'detected', 'true'] %}
+        {% set contact_ns.open = true %}
+      {% endif %}
+    {% endfor %}
+    {% if s_effective_off_logic == 'both_absent' %}
+      {{ motion_clear and presence_clear }}
+    {% elif s_effective_off_logic == 'presence_only' %}
+      {{ presence_clear }}
+    {% elif s_effective_off_logic == 'motion_only' %}
+      {{ motion_clear }}
+    {% elif s_effective_off_logic == 'either_absent' %}
+      {{ motion_clear or presence_clear }}
+    {% else %}
+      False
+    {% endif %}
+  s_contacts_guard_violation: >
+    {{ (cfg_off_require_contacts_closed or cfg_off_allow_contacts_closed_as_or) and not ((cfg_contact_sensors | default([])) | length > 0) }}
+  s_should_turn_off: >
+    {% set base_ready = s_off_base_condition in ['True', 'true', True] %}
+    {% set contacts_all_closed = s_all_contacts_closed in ['True', 'true', True] %}
+    {% set require_contacts = cfg_off_require_contacts_closed and ((cfg_contact_sensors | default([])) | length > 0) %}
+    {% set allow_contacts_or = cfg_off_allow_contacts_closed_as_or and ((cfg_contact_sensors | default([])) | length > 0) %}
+    {% if allow_contacts_or and contacts_all_closed %}
+      True
+    {% elif require_contacts %}
+      {{ base_ready and contacts_all_closed }}
+    {% else %}
+      {{ base_ready }}
+    {% endif %}
+
+condition: []
+
+action:
+  - choose:
+      - conditions: "{{ cfg_bypass is not none and is_state(cfg_bypass, 'on') }}"
+        sequence:
+          - stop: Bypass aktiv.
+      - conditions: "{{ cfg_dark_mode == 'lux' and not cfg_lux_sensor }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: Flurlicht Blueprint
+              message: "Dunkelheitslogik 'Lux' erfordert einen Lux-Sensor. Aktion abgebrochen."
+          - stop: Lux-Sensor fehlt.
+      - conditions: "{{ s_contacts_guard_violation in ['True', 'true', True] }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: Flurlicht Blueprint
+              message: "Kontakt-Toggles aktiv, aber keine Kontakte gewählt. Fallback auf 'Bewegung UND Präsenz'."
+  - choose:
+      - conditions: "{{ s_should_turn_on in ['True', 'true', True] and s_dark_allows_on in ['True', 'true', True] }}"
+        sequence:
+          - service: light.turn_on
+            target: !input cfg_light_target
+            data:
+              brightness_pct: "{{ cfg_brightness_pct | default(omit) }}"
+              transition: "{{ cfg_transition_on | default(omit) }}"
+  - wait_for_trigger:
+      - platform: template
+        value_template: >
+          {% set motion_clear = not ((cfg_motion_sensor is not none) and (is_state(cfg_motion_sensor, 'on') or is_state(cfg_motion_sensor, 'open') or is_state(cfg_motion_sensor, 'detected'))) %}
+          {% set presence_clear = not ((cfg_presence_sensor is not none) and ((states(cfg_presence_sensor) | float(0)) >= (cfg_presence_threshold | float(0)))) %}
+          {% set contacts = expand(cfg_contact_sensors | default([])) %}
+          {% set contact_ns = namespace(open=false) %}
+          {% for ent in contacts %}
+            {% if ent.state in ['on', 'open', 'detected', 'true'] %}
+              {% set contact_ns.open = true %}
+            {% endif %}
+          {% endfor %}
+          {% set contacts_all_closed = (contacts | length == 0) or (not contact_ns.open) %}
+          {% set base_ready = False %}
+          {% if s_effective_off_logic == 'both_absent' %}
+            {% set base_ready = motion_clear and presence_clear %}
+          {% elif s_effective_off_logic == 'presence_only' %}
+            {% set base_ready = presence_clear %}
+          {% elif s_effective_off_logic == 'motion_only' %}
+            {% set base_ready = motion_clear %}
+          {% elif s_effective_off_logic == 'either_absent' %}
+            {% set base_ready = motion_clear or presence_clear %}
+          {% endif %}
+          {% set require_contacts = cfg_off_require_contacts_closed and (contacts | length > 0) %}
+          {% set allow_contacts_or = cfg_off_allow_contacts_closed_as_or and (contacts | length > 0) %}
+          {% if allow_contacts_or and contacts_all_closed %}
+            True
+          {% elif require_contacts %}
+            {{ base_ready and contacts_all_closed }}
+          {% else %}
+            {{ base_ready }}
+          {% endif %}
+        for:
+          seconds: "{{ cfg_off_delay | int }}"
+    continue_on_timeout: false
+  - service: light.turn_off
+    target: !input cfg_light_target
+    data:
+      transition: "{{ cfg_transition_off | default(omit) }}"
