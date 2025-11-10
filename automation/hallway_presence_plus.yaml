@@ -1,0 +1,153 @@
+blueprint:
+  name: Flur – Bewegung + Präsenz (Meross)
+  description: >
+    Schaltet das Licht bei Bewegung/Präsenz ein und hält es an, solange Präsenz erkannt wird.
+    Schaltet erst aus, wenn Präsenz UND Bewegung für eine einstellbare Zeit abwesend sind.
+    Optional nur bei Dunkelheit (Sonne oder Lux). Mit Sperre (Bypass).
+  domain: automation
+  input:
+    motion_sensor:
+      name: Bewegungsmelder
+      description: Binary Sensor für Bewegung
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - motion
+            - occupancy
+    presence_sensor:
+      name: Präsenzsensor (numerisch)
+      description: >
+        Numerischer Präsenz-Wert (Meross: 1 = niemand, 2/… = anwesend).
+      selector:
+        entity:
+          domain: sensor
+    presence_active_threshold:
+      name: Präsenz gilt ab Wert ≥
+      description: Ab welchem Wert gilt “anwesend”
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: slider
+    target_lights:
+      name: Licht(er)
+      description: Zu schaltende Lampen
+      selector:
+        entity:
+          domain: light
+          multiple: true
+    off_delay:
+      name: Ausschaltverzögerung bei Abwesenheit (Sekunden)
+      description: So lange müssen Bewegung=aus UND Präsenz < Schwellwert anliegen
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 900
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+    dark_condition:
+      name: Dunkelheitsbedingung
+      description: Wann darf eingeschaltet werden?
+      default: Keine
+      selector:
+        select:
+          options:
+            - label: Keine
+              value: none
+            - label: Sonne unter Horizont
+              value: sun
+            - label: Lux unter Schwelle
+              value: lux
+    illuminance_sensor:
+      name: Helligkeitssensor (Lux, optional – nur wenn „Lux unter Schwelle“)
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class:
+            - illuminance
+    illuminance_below:
+      name: Lux-Schwelle
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+          mode: slider
+    bypass_helper:
+      name: Sperre (input_boolean, optional)
+      description: Wenn EIN, macht die Automation nichts.
+      default: []
+      selector:
+        entity:
+          domain: input_boolean
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  v_motion: !input motion_sensor
+  v_presence: !input presence_sensor
+  v_p_thresh: !input presence_active_threshold
+  v_off_delay: !input off_delay
+  v_dark_mode: !input dark_condition
+  v_lux_entity: !input illuminance_sensor
+  v_lux_thresh: !input illuminance_below
+  v_bypass: !input bypass_helper
+  v_lights: !input target_lights
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: 'on'
+  - platform: numeric_state
+    entity_id: !input presence_sensor
+    above: !input presence_active_threshold
+
+condition:
+  # Sperre (optional)
+  - condition: template
+    value_template: >
+      {% if v_bypass in [None, '', []] %} true
+      {% else %} {{ is_state(v_bypass, 'off') }}
+      {% endif %}
+
+  # Dunkelheitsbedingung beim Einschalten
+  - condition: template
+    value_template: >
+      {% if v_dark_mode == 'none' %}
+        true
+      {% elif v_dark_mode == 'sun' %}
+        {{ is_state('sun.sun','below_horizon') }}
+      {% else %}
+        {% if v_lux_entity in [None, '', []] %}
+          false
+        {% else %}
+          {{ (states(v_lux_entity) | float(9999)) < (v_lux_thresh | float(30)) }}
+        {% endif %}
+      {% endif %}
+
+action:
+  - service: light.turn_on
+    target:
+      entity_id: !input target_lights
+
+  # Warten bis *gleichzeitig* keine Bewegung ist *und* Präsenz < Schwellwert
+  - wait_for_trigger:
+      - platform: template
+        value_template: >
+          {{ is_state(v_motion, 'off')
+             and (states(v_presence) | float(0)) < (v_p_thresh | float(1)) }}
+        for:
+          seconds: !input off_delay
+    continue_on_timeout: false
+
+  - service: light.turn_off
+    target:
+      entity_id: !input target_lights
