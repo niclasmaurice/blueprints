@@ -7,9 +7,6 @@ blueprint:
     Nachtmodus (dimmen statt aus), optionaler Off-Timer. Saubere Guards.
   domain: automation
   source_url: "https://github.com/niclasmaurice/blueprints"
-  homeassistant:
-    min_version: 2023.9
-  blueprint_version: "2.0.0"
 
   input:
     # --- Sensoren (alle optional, außer Ziel) ---
