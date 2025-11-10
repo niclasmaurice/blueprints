@@ -1,0 +1,551 @@
+blueprint:
+  name: Flurlicht – v2 Plus (Präsenz/Bewegung/Kontakt, Hysterese, Lockout, Nacht)
+  description: >
+    Flexibles Flurlicht: Bewegung/Präsenz/Kontakt (alles optional).
+    AN-/AUS-Logik wählbar (Buttons). Kontakt kann AUS als AND/OR beeinflussen.
+    Lux-Hysterese (ein/aus getrennt), Mindest-Einschaltzeit, Lockout nach AUS,
+    Nachtmodus (dimmen statt aus), optionaler Off-Timer. Saubere Guards.
+  domain: automation
+  source_url: "https://github.com/niclasmaurice/blueprints"
+  homeassistant:
+    min_version: 2023.9
+  blueprint_version: "2.0.0"
+
+  input:
+    # --- Sensoren (alle optional, außer Ziel) ---
+    motion_sensors:
+      name: Bewegungsmelder (optional)
+      description: "Binary-Sensoren (motion/occupancy). Leer lassen, wenn nicht genutzt."
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: [motion, occupancy]
+          multiple: true
+
+    contact_sensors:
+      name: Tür-/Fensterkontakte (optional)
+      description: "Binary-Sensoren: door/window/opening/garage_door"
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: [door, window, opening, garage_door]
+          multiple: true
+
+    presence_sensor:
+      name: Präsenzsensor (numerisch, optional)
+      description: "z. B. Meross: 0 = niemand, 1/2/… = anwesend. Leer lassen, wenn nicht genutzt."
+      default: null
+      selector:
+        entity:
+          domain:
+            - sensor
+            - number
+
+    presence_threshold:
+      name: Präsenz gilt ab Wert ≥
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+
+    # --- Logik ---
+    on_logic:
+      name: AN-Logik
+      description: "Wann soll eingeschaltet werden?"
+      default: any
+      selector:
+        select:
+          options:
+            - { label: "any (Bewegung ODER Präsenz ODER Kontakt offen)", value: any }
+            - { label: "all ((Bewegung ODER Kontakt) UND Präsenz)", value: all }
+            - { label: "motion_only (nur Bewegung)", value: motion_only }
+            - { label: "presence_only (nur Präsenz)", value: presence_only }
+            - { label: "contact_only (nur Kontakt offen)", value: contact_only }
+
+    off_logic:
+      name: AUS-Logik
+      description: "Welche Abwesenheit führt zum Ausschalten?"
+      default: both_absent
+      selector:
+        select:
+          options:
+            - { label: "both_absent (alle Bewegung AUS UND Präsenz < Schwelle)", value: both_absent }
+            - { label: "presence_only (nur Präsenz < Schwelle)", value: presence_only }
+            - { label: "motion_only (nur alle Bewegung AUS)", value: motion_only }
+            - { label: "either_absent (Bewegung AUS ODER Präsenz < Schwelle)", value: either_absent }
+
+    off_require_contacts_closed:
+      name: Kontakte erfordern (AND)
+      description: "Zum Ausschalten müssen zusätzlich ALLE Kontakte zu sein."
+      default: false
+      selector:
+        boolean: {}
+
+    off_allow_contacts_closed_as_or:
+      name: Kontakte erlauben (OR)
+      description: "Zusätzlich AUS, sobald ALLE Kontakte zu sind – auch wenn Abwesenheit noch nicht erfüllt ist."
+      default: false
+      selector:
+        boolean: {}
+
+    off_absence_for_seconds:
+      name: Abwesenheit muss anliegen für (Sek.)
+      description: "Durchgehende Dauer, bevor ausgeschaltet wird."
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 1800
+          step: 1
+          unit_of_measurement: s
+
+    # --- Dunkelheit & Hysterese ---
+    dark_mode:
+      name: Nur bei Dunkelheit schalten?
+      description: "Optional – Sonne oder Lux (mit Hysterese)."
+      default: none
+      selector:
+        select:
+          options:
+            - { label: "Keine", value: none }
+            - { label: "Sonne unter Horizont", value: sun }
+            - { label: "Lux (Hysterese)", value: lux }
+
+    lux_sensor:
+      name: Lux-Sensor (optional)
+      description: "Erforderlich, wenn Dunkelheit = Lux."
+      default: null
+      selector:
+        entity:
+          domain:
+            - sensor
+            - number
+
+    lux_on_below:
+      name: Lux – einschalten unter
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+
+    lux_off_above:
+      name: Lux – ausschalten über
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+
+    # --- Ziel & Verhalten ---
+    lights:
+      name: Ziel (Area/Device/Entity)
+      description: "Licht(er) / Gruppe wählen."
+      selector:
+        target:
+          area: {}
+          device: {}
+          entity:
+            domain: light
+          multiple: true
+
+    use_brightness:
+      name: Helligkeit beim Einschalten setzen?
+      default: false
+      selector:
+        boolean: {}
+
+    brightness_pct:
+      name: Helligkeit (%)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    transition_on:
+      name: Transition EIN (Sek.)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          unit_of_measurement: s
+
+    transition_off:
+      name: Transition AUS (Sek.)
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 1
+          unit_of_measurement: s
+
+    # --- Stabilität & Komfort ---
+    min_on_time_seconds:
+      name: Mindest-Einschaltzeit (Sek.)
+      description: "Wenn an, dann mind. so lange anlassen (Anti-Flackern)."
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 600
+          step: 1
+          unit_of_measurement: s
+
+    rearm_lockout_seconds:
+      name: Nach-AUS Sperrzeit (Sek.)
+      description: "In dieser Zeit nicht wieder automatisch einschalten."
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 600
+          step: 1
+          unit_of_measurement: s
+
+    manual_lockout:
+      name: Lockout-Flag (input_boolean, optional)
+      description: "Wird beim Ausschalten kurz gesetzt und nach der Sperrzeit zurückgenommen."
+      default: null
+      selector:
+        entity:
+          domain: input_boolean
+
+    night_mode:
+      name: Nachtmodus aktiv?
+      description: "Statt AUS wird gedimmt."
+      default: false
+      selector:
+        boolean: {}
+
+    night_brightness_pct:
+      name: Nacht-Helligkeit (%)
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    off_timer:
+      name: Off-Timer (timer.*, optional)
+      description: "Zeigt die AUS-Countdowns sichtbar im UI."
+      default: null
+      selector:
+        entity:
+          domain: timer
+
+    # --- Bypass ---
+    bypass:
+      name: Sperre (input_boolean, optional)
+      description: "Wenn EIN, macht die Automation nichts."
+      default: null
+      selector:
+        entity:
+          domain: input_boolean
+
+mode: restart
+max_exceeded: silent
+
+# =========================
+# Variablen / Zustände
+# =========================
+variables:
+  cfg_motion: !input motion_sensors
+  cfg_contact: !input contact_sensors
+  cfg_presence: !input presence_sensor
+  cfg_thresh: !input presence_threshold
+  cfg_on_logic: !input on_logic
+  cfg_off_logic: !input off_logic
+  cfg_off_for: !input off_absence_for_seconds
+  cfg_lights: !input lights
+  cfg_dark_mode: !input dark_mode
+  cfg_lux: !input lux_sensor
+  cfg_lux_on: !input lux_on_below
+  cfg_lux_off: !input lux_off_above
+  cfg_bypass: !input bypass
+  cfg_use_bright: !input use_brightness
+  cfg_bright: !input brightness_pct
+  cfg_tr_on: !input transition_on
+  cfg_tr_off: !input transition_off
+  cfg_min_on: !input min_on_time_seconds
+  cfg_lockout_s: !input rearm_lockout_seconds
+  cfg_lockout_flag: !input manual_lockout
+  cfg_night: !input night_mode
+  cfg_night_pct: !input night_brightness_pct
+  cfg_timer: !input off_timer
+  cfg_off_and_contacts: !input off_require_contacts_closed
+  cfg_off_or_contacts: !input off_allow_contacts_closed_as_or
+
+  s_motion_any_on: >
+    {% set lst = expand(cfg_motion) | list %}
+    {{ lst | length > 0 and (lst | selectattr('state','eq','on') | list | length) > 0 }}
+  s_motion_all_off: >
+    {% set lst = expand(cfg_motion) | list %}
+    {{ lst | length == 0 or (lst | selectattr('state','eq','off') | list | length) == (lst | length) }}
+
+  s_contact_any_open: >
+    {% set lst = expand(cfg_contact) | list %}
+    {{ lst | length > 0 and (lst | selectattr('state','eq','on') | list | length) > 0 }}
+  s_contact_all_closed: >
+    {% set lst = expand(cfg_contact) | list %}
+    {{ lst | length > 0 and (lst | selectattr('state','eq','off') | list | length) == (lst | length) }}
+
+  s_presence_available: >
+    {{ not (cfg_presence in [None, '', []]) and (states.get(cfg_presence) is not none) }}
+  s_presence_active: >
+    {{ s_presence_available and ((states(cfg_presence) | float(0)) >= (cfg_thresh | float(1))) }}
+  s_presence_below: >
+    {{ (not s_presence_available) or ((states(cfg_presence) | float(0)) < (cfg_thresh | float(1))) }}
+
+  # Dunkelheit mit Hysterese
+  s_dark_ok: >
+    {% if cfg_dark_mode == 'none' %}
+      true
+    {% elif cfg_dark_mode == 'sun' %}
+      {{ is_state('sun.sun', 'below_horizon') }}
+    {% else %}
+      {% if cfg_lux in [None, '', []] %} false
+      {% else %} {{ (states(cfg_lux) | float(9999)) < (cfg_lux_on | float(30)) }}
+      {% endif %}
+    {% endif %}
+  s_bright_now: >
+    {% if cfg_dark_mode != 'lux' or cfg_lux in [None, '', []] %} false
+    {% else %} {{ (states(cfg_lux) | float(0)) > (cfg_lux_off | float(60)) }}
+    {% endif %}
+
+# =========================
+# Trigger
+# =========================
+trigger:
+  - platform: state
+    entity_id: !input motion_sensors
+    to: "on"
+  - platform: state
+    entity_id: !input contact_sensors
+    to: "on"
+
+# =========================
+# Bedingungen (Bypass, Lockout)
+# =========================
+condition:
+  - condition: template
+    value_template: >
+      {% if cfg_bypass in [None, '', []] %} true
+      {% else %} {{ is_state(cfg_bypass, 'off') }}
+      {% endif %}
+  - condition: template
+    value_template: >
+      {% if cfg_lockout_flag in [None, '', []] %} true
+      {% else %} {{ is_state(cfg_lockout_flag, 'off') }}
+      {% endif %}
+
+# =========================
+# Aktionen
+# =========================
+action:
+  # --- Guards / Hinweise ---
+  - choose:
+      - conditions: "{{ cfg_on_logic == 'presence_only' and not s_presence_available }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "Flurlicht – Konfiguration prüfen"
+              message: "AN-Logik 'presence_only' gewählt, aber kein Präsenzsensor gesetzt. Aktion wird übersprungen."
+          - stop: "presence_only ohne Präsenzsensor"
+
+      - conditions: "{{ cfg_off_logic == 'presence_only' and not s_presence_available }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "Flurlicht – Konfiguration angepasst"
+              message: "AUS-Logik 'presence_only' gewählt, aber kein Präsenzsensor gesetzt. Fallback auf 'motion_only'."
+          - variables:
+              cfg_off_logic: "motion_only"
+
+      - conditions: "{{ cfg_dark_mode == 'lux' and (cfg_lux in [None, '', []]) }}"
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "Flurlicht – Konfiguration prüfen"
+              message: "Lux-Modus gewählt, aber kein Lux-Sensor gesetzt. Aktion wird übersprungen."
+          - stop: "Lux-Sensor fehlt"
+
+      - conditions: >
+          {{ (cfg_off_and_contacts or cfg_off_or_contacts)
+             and (expand(cfg_contact) | list | length == 0) }}
+        sequence:
+          - service: persistent_notification.create
+            data:
+              title: "Flurlicht – Konfiguration geprüft"
+              message: "Kontakt-Optionen für AUS aktiv, aber keine Kontakte ausgewählt. Es wird ohne Kontakt-Optionen fortgefahren."
+          - variables:
+              cfg_off_and_contacts: false
+              cfg_off_or_contacts: false
+    default: []
+
+  # --- Einschalten je nach Logik ---
+  - choose:
+      - conditions: >
+          {{ cfg_dark_mode == 'none' or s_dark_ok }}
+        sequence:
+          - choose:
+              - conditions: "{{ cfg_on_logic == 'all' }}"
+                sequence:
+                  - wait_template: "{{ (s_motion_any_on or s_contact_any_open) and s_presence_active }}"
+                    continue_on_timeout: false
+                  - service: homeassistant.turn_on
+                    target: !input lights
+                    data: >
+                      {% set d = {} %}
+                      {% if cfg_use_bright %}{% set _ = d.update({'brightness_pct': cfg_bright | int}) %}{% endif %}
+                      {% if (cfg_tr_on | int) > 0 %}{% set _ = d.update({'transition': cfg_tr_on | int}) %}{% endif %}
+                      {{ d }}
+
+              - conditions: "{{ cfg_on_logic == 'any' and (s_motion_any_on or s_contact_any_open or s_presence_active) }}"
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input lights
+                    data: >
+                      {% set d = {} %}
+                      {% if cfg_use_bright %}{% set _ = d.update({'brightness_pct': cfg_bright | int}) %}{% endif %}
+                      {% if (cfg_tr_on | int) > 0 %}{% set _ = d.update({'transition': cfg_tr_on | int}) %}{% endif %}
+                      {{ d }}
+
+              - conditions: "{{ cfg_on_logic == 'motion_only' and s_motion_any_on }}"
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input lights
+                    data: >
+                      {% set d = {} %}
+                      {% if cfg_use_bright %}{% set _ = d.update({'brightness_pct': cfg_bright | int}) %}{% endif %}
+                      {% if (cfg_tr_on | int) > 0 %}{% set _ = d.update({'transition': cfg_tr_on | int}) %}{% endif %}
+                      {{ d }}
+
+              - conditions: "{{ cfg_on_logic == 'presence_only' and s_presence_active }}"
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input lights
+                    data: >
+                      {% set d = {} %}
+                      {% if cfg_use_bright %}{% set _ = d.update({'brightness_pct': cfg_bright | int}) %}{% endif %}
+                      {% if (cfg_tr_on | int) > 0 %}{% set _ = d.update({'transition': cfg_tr_on | int}) %}{% endif %}
+                      {{ d }}
+
+              - conditions: "{{ cfg_on_logic == 'contact_only' and s_contact_any_open }}"
+                sequence:
+                  - service: homeassistant.turn_on
+                    target: !input lights
+                    data: >
+                      {% set d = {} %}
+                      {% if cfg_use_bright %}{% set _ = d.update({'brightness_pct': cfg_bright | int}) %}{% endif %}
+                      {% if (cfg_tr_on | int) > 0 %}{% set _ = d.update({'transition': cfg_tr_on | int}) %}{% endif %}
+                      {{ d }}
+    default: []
+
+  # --- Off-Timer sichtbar starten (und vorher abbrechen)
+  - choose:
+      - conditions: "{{ cfg_timer not in [None, '', []] }}"
+        sequence:
+          - service: timer.cancel
+            target:
+              entity_id: !input off_timer
+          - service: timer.start
+            target:
+              entity_id: !input off_timer
+            data:
+              duration: "{{ cfg_off_for | int }}"
+    default: []
+
+  # --- AUS-Phase: warte, bis AUS-Logik (ggf. inkl. Kontakte) X Sek. erfüllt ist ---
+  - wait_for_trigger:
+      - platform: template
+        value_template: >
+          {% set base =
+            (cfg_off_logic == 'both_absent' and s_motion_all_off and s_presence_below) or
+            (cfg_off_logic == 'presence_only' and s_presence_below) or
+            (cfg_off_logic == 'motion_only' and s_motion_all_off) or
+            (cfg_off_logic == 'either_absent' and (s_motion_all_off or s_presence_below))
+          %}
+          {% set and_ok = (not cfg_off_and_contacts) or s_contact_all_closed %}
+          {% set or_ok = (cfg_off_or_contacts and s_contact_all_closed) %}
+          {{ (base and and_ok) or or_ok }}
+        for:
+          seconds: !input off_absence_for_seconds
+    continue_on_timeout: false
+
+  # --- Off-Timer stoppen, wenn erreicht ---
+  - choose:
+      - conditions: "{{ cfg_timer not in [None, '', []] }}"
+        sequence:
+          - service: timer.cancel
+            target:
+              entity_id: !input off_timer
+    default: []
+
+  # --- Mindest-Einschaltzeit sicherstellen (Anti-Flackern) ---
+  - variables:
+      _ents: "{{ (expand(cfg_lights.entity_id | default([])) | map(attribute='entity_id') | list) }}"
+      _earliest_on_ts: >
+        {% set on_ts = _ents
+           | map('states')
+           | selectattr('state','eq','on')
+           | map(attribute='last_changed')
+           | map('as_timestamp')
+           | list %}
+        {{ (on_ts | min(default=as_timestamp(now()))) }}
+      _remain: >
+        {% set since = (as_timestamp(now()) - _earliest_on_ts) | int(0) %}
+        {% set need = cfg_min_on | int(0) %}
+        {{ [0, need - since] | max | int }}
+  - choose:
+      - conditions: "{{ _remain | int(0) > 0 }}"
+        sequence:
+          - delay:
+              seconds: "{{ _remain | int(0) }}"
+    default: []
+
+  # --- Nachtmodus oder AUS ---
+  - choose:
+      - conditions: "{{ cfg_night }}"
+        sequence:
+          - service: homeassistant.turn_on
+            target: !input lights
+            data:
+              brightness_pct: !input night_brightness_pct
+              transition: "{{ cfg_tr_off | int(0) }}"
+      - conditions: "{{ cfg_dark_mode == 'lux' and not s_bright_now }}"
+        sequence:
+          # Bei Lux-Hysterese: wenn es noch nicht hell genug ist, nicht ausschalten
+          - stop: "Lux-Hysterese verhindert Ausschalten (noch dunkel)"
+    default:
+      - service: homeassistant.turn_off
+        target: !input lights
+        data:
+          transition: "{{ cfg_tr_off | int(0) }}"
+
+  # --- Lockout setzen und automatisch re-armen ---
+  - choose:
+      - conditions: "{{ cfg_lockout_flag not in [None, '', []] and (cfg_lockout_s | int(0)) > 0 }}"
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: !input manual_lockout
+          - delay:
+              seconds: !input rearm_lockout_seconds
+          - service: input_boolean.turn_off
+            target:
+              entity_id: !input manual_lockout
+    default: []
