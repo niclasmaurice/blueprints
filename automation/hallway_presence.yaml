@@ -89,7 +89,7 @@ blueprint:
           domain: input_boolean
 
 mode: restart
-max_exceeds: silent
+max_exceeded: silent
 
 variables:
   v_motion: !input motion_sensor
