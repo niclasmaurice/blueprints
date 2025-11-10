@@ -145,12 +145,7 @@ blueprint:
       name: Ziel (Area/Device/Entity)
       description: "Licht(er) / Gruppe wählen."
       selector:
-        target:
-          area: {}
-          device: {}
-          entity:
-            domain: light
-          multiple: true
+        target: {}
 
     use_brightness:
       name: Helligkeit beim Einschalten setzen?
