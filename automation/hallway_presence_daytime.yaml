@@ -1,0 +1,339 @@
+blueprint:
+  name: Flur – Bewegung + Präsenz (Meross) + Zeit-Helligkeit
+  description: >
+    Schaltet das Licht bei Bewegung/Präsenz ein und hält es an, solange Präsenz erkannt wird.
+    Schaltet erst aus, wenn Präsenz UND Bewegung für eine einstellbare Zeit abwesend sind.
+    Optional nur bei Dunkelheit (Sonne oder Lux). Mit Sperre (Bypass).
+    NEU: Helligkeit je nach Uhrzeit (keine/fest/Zeitprofil).
+  domain: automation
+  input:
+    motion_sensor:
+      name: Bewegungsmelder
+      description: "Binary Sensor für Bewegung"
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class:
+            - motion
+            - occupancy
+
+    presence_sensor:
+      name: Präsenzsensor (numerisch)
+      description: "Numerischer Präsenz-Wert (Meross: 1 = niemand, 2/… = anwesend)."
+      selector:
+        entity:
+          domain: sensor
+
+    presence_active_threshold:
+      name: Präsenz gilt ab Wert ≥
+      description: "Ab welchem Wert gilt „anwesend“"
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: slider
+
+    target_lights:
+      name: Licht(er)
+      description: "Zu schaltende Lampen"
+      selector:
+        entity:
+          domain: light
+          multiple: true
+
+    off_delay:
+      name: Ausschaltverzögerung bei Abwesenheit (Sekunden)
+      description: "So lange müssen Bewegung=aus UND Präsenz < Schwellwert anliegen"
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 900
+          step: 1
+          unit_of_measurement: s
+          mode: slider
+
+    dark_condition:
+      name: Dunkelheitsbedingung
+      description: "Wann darf eingeschaltet werden?"
+      default: none
+      selector:
+        select:
+          options:
+            - label: Keine
+              value: none
+            - label: Sonne unter Horizont
+              value: sun
+            - label: Lux unter Schwelle
+              value: lux
+
+    illuminance_sensor:
+      name: Helligkeitssensor (Lux, optional – nur wenn „Lux unter Schwelle“)
+      default: []
+      selector:
+        entity:
+          domain: sensor
+          device_class:
+            - illuminance
+
+    illuminance_below:
+      name: Lux-Schwelle
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+          mode: slider
+
+    bypass_helper:
+      name: Sperre (input_boolean, optional)
+      description: "Wenn EIN, macht die Automation nichts."
+      default: []
+      selector:
+        entity:
+          domain: input_boolean
+
+    # --- Neu: Helligkeit nach Uhrzeit ---
+    brightness_mode:
+      name: Helligkeitsmodus
+      description: "Keine Vorgabe, fester Wert oder Zeitprofil (Morgen/Tag/Abend/Nacht)"
+      default: none
+      selector:
+        select:
+          options:
+            - { label: "Keine (Lampe behält letzte Helligkeit)", value: none }
+            - { label: "Fest (ein Wert für alle Zeiten)", value: fixed }
+            - { label: "Zeitprofil (Morgen/Tag/Abend/Nacht)", value: schedule }
+
+    brightness_fixed_pct:
+      name: Feste Helligkeit (%)
+      description: "Nur bei Modus „Fest“"
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    # Zeitprofil – Uhrzeiten & Helligkeiten
+    time_morning_start:
+      name: Morgen – Start
+      default: "06:30:00"
+      selector:
+        time: {}
+
+    time_morning_end:
+      name: Morgen – Ende
+      default: "09:30:00"
+      selector:
+        time: {}
+
+    brightness_morning_pct:
+      name: Morgen – Helligkeit (%)
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    time_day_start:
+      name: Tag – Start
+      default: "09:30:00"
+      selector:
+        time: {}
+
+    time_day_end:
+      name: Tag – Ende
+      default: "18:00:00"
+      selector:
+        time: {}
+
+    brightness_day_pct:
+      name: Tag – Helligkeit (%)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    time_evening_start:
+      name: Abend – Start
+      default: "18:00:00"
+      selector:
+        time: {}
+
+    time_evening_end:
+      name: Abend – Ende
+      default: "22:00:00"
+      selector:
+        time: {}
+
+    brightness_evening_pct:
+      name: Abend – Helligkeit (%)
+      default: 70
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+    time_night_start:
+      name: Nacht – Start
+      default: "22:00:00"
+      selector:
+        time: {}
+
+    time_night_end:
+      name: Nacht – Ende
+      default: "06:30:00"
+      selector:
+        time: {}
+
+    brightness_night_pct:
+      name: Nacht – Helligkeit (%)
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+
+mode: restart
+max_exceeded: silent
+
+variables:
+  v_motion: !input motion_sensor
+  v_presence: !input presence_sensor
+  v_p_thresh: !input presence_active_threshold
+  v_off_delay: !input off_delay
+  v_dark_mode: !input dark_condition
+  v_lux_entity: !input illuminance_sensor
+  v_lux_thresh: !input illuminance_below
+  v_bypass: !input bypass_helper
+  v_lights: !input target_lights
+
+  # Zeit-Helligkeit
+  v_bright_mode: !input brightness_mode
+  v_bright_fixed: !input brightness_fixed_pct
+
+  v_t_mo_s: !input time_morning_start
+  v_t_mo_e: !input time_morning_end
+  v_b_mo: !input brightness_morning_pct
+
+  v_t_da_s: !input time_day_start
+  v_t_da_e: !input time_day_end
+  v_b_da: !input brightness_day_pct
+
+  v_t_ev_s: !input time_evening_start
+  v_t_ev_e: !input time_evening_end
+  v_b_ev: !input brightness_evening_pct
+
+  v_t_ni_s: !input time_night_start
+  v_t_ni_e: !input time_night_end
+  v_b_ni: !input brightness_night_pct
+
+  # Helper: Prüft, ob "jetzt" innerhalb eines Start/End-Fensters liegt (auch über Mitternacht)
+  in_window_mo: >
+    {% set now_ts = as_timestamp(now()) %}
+    {% set s = as_timestamp(today_at(v_t_mo_s)) %}
+    {% set e = as_timestamp(today_at(v_t_mo_e)) %}
+    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+  in_window_da: >
+    {% set now_ts = as_timestamp(now()) %}
+    {% set s = as_timestamp(today_at(v_t_da_s)) %}
+    {% set e = as_timestamp(today_at(v_t_da_e)) %}
+    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+  in_window_ev: >
+    {% set now_ts = as_timestamp(now()) %}
+    {% set s = as_timestamp(today_at(v_t_ev_s)) %}
+    {% set e = as_timestamp(today_at(v_t_ev_e)) %}
+    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+  in_window_ni: >
+    {% set now_ts = as_timestamp(now()) %}
+    {% set s = as_timestamp(today_at(v_t_ni_s)) %}
+    {% set e = as_timestamp(today_at(v_t_ni_e)) %}
+    {{ (s <= e and now_ts >= s and now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
+
+  # Ergebnis-Helligkeit jetzt
+  v_brightness_now: >
+    {% if v_bright_mode == 'fixed' %}
+      {{ v_bright_fixed | int }}
+    {% elif v_bright_mode == 'schedule' %}
+      {% if in_window_mo %} {{ v_b_mo | int }}
+      {% elif in_window_da %} {{ v_b_da | int }}
+      {% elif in_window_ev %} {{ v_b_ev | int }}
+      {% elif in_window_ni %} {{ v_b_ni | int }}
+      {% else %} {{ v_b_da | int }} {# Fallback: Tag #}
+      {% endif %}
+    {% else %}
+      {{ 0 }}
+    {% endif %}
+
+trigger:
+  - platform: state
+    entity_id: !input motion_sensor
+    to: 'on'
+  - platform: numeric_state
+    entity_id: !input presence_sensor
+    above: !input presence_active_threshold
+
+condition:
+  # Sperre (optional)
+  - condition: template
+    value_template: >
+      {% if v_bypass in [None, '', []] %} true
+      {% else %} {{ is_state(v_bypass, 'off') }}
+      {% endif %}
+
+  # Dunkelheitsbedingung beim Einschalten
+  - condition: template
+    value_template: >
+      {% if v_dark_mode == 'none' %}
+        true
+      {% elif v_dark_mode == 'sun' %}
+        {{ is_state('sun.sun','below_horizon') }}
+      {% else %}
+        {% if v_lux_entity in [None, '', []] %}
+          false
+        {% else %}
+          {{ (states(v_lux_entity) | float(9999)) < (v_lux_thresh | float(30)) }}
+        {% endif %}
+      {% endif %}
+
+action:
+  # Einschalten (mit optionaler Helligkeit je Modus)
+  - service: light.turn_on
+    target:
+      entity_id: !input target_lights
+    data: >
+      {% set d = {} %}
+      {% if v_bright_mode == 'fixed' %}
+        {% set _ = d.update({'brightness_pct': (v_bright_fixed | int) }) %}
+      {% elif v_bright_mode == 'schedule' %}
+        {% set _ = d.update({'brightness_pct': (v_brightness_now | int) }) %}
+      {% endif %}
+      {{ d }}
+
+  # Warten bis *gleichzeitig* keine Bewegung ist *und* Präsenz < Schwellwert
+  - wait_for_trigger:
+      - platform: template
+        value_template: >
+          {{ is_state(v_motion, 'off')
+             and (states(v_presence) | float(0)) < (v_p_thresh | float(1)) }}
+        for:
+          seconds: !input off_delay
+    continue_on_timeout: false
+
+  - service: light.turn_off
+    target:
+      entity_id: !input target_lights
