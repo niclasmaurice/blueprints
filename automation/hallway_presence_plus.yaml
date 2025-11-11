@@ -1,9 +1,9 @@
 blueprint:
-  name: Flur – Bewegung + Präsenz (Meross) + Zeit-Helligkeit + Distanz + Auswahl
+  name: Flur – Bewegung + Präsenz (Meross) · Auswahl + Zeit-Helligkeit + Distanz
   description: >
-    Schaltet das Licht bei Bewegung/Präsenz ein (quellen-selektiv) und hält es an, solange Präsenz erkannt wird.
-    Ausschalten nach wählbarer Abwesenheitslogik. Optional nur bei Dunkelheit (Sonne/Lux).
-    Zeitabhängige Helligkeit (fest/Profil). Distanz-Gate optional zuschaltbar. Mit Bypass.
+    Einschalten, wenn (konfigurierbar) Bewegung und/oder Präsenz; Ausschalten nach wählbarer Abwesenheitslogik.
+    Optional nur bei Dunkelheit (Sonne/Lux). Zeitabhängige Helligkeit (fest/Profil).
+    Distanz-Gate optional. Mit Bypass und Debug-Ausgaben.
   domain: automation
 
   input:
@@ -23,6 +23,7 @@ blueprint:
 
     presence_active_threshold:
       name: Präsenz gilt ab Wert ≥
+      description: "Meross: i. d. R. 2 = anwesend (1 = niemand)."
       default: 1
       selector: { number: { min: 0, max: 10, step: 1, mode: slider } }
 
@@ -33,7 +34,7 @@ blueprint:
           domain: light
           multiple: true
 
-    # --- Ein-/Aus-Logik konfigurierbar ---
+    # --- Auswahl für Einschalten ---
     use_motion_for_on:
       name: Bewegung für AN verwenden?
       default: true
@@ -44,9 +45,9 @@ blueprint:
       default: true
       selector: { boolean: {} }
 
+    # --- Ausschalt-Logik ---
     off_logic:
       name: AUS-Logik
-      description: "Welche Abwesenheit führt zum Ausschalten?"
       default: both_absent
       selector:
         select:
@@ -184,6 +185,12 @@ blueprint:
       default: 3
       selector: { number: { min: 0, max: 30, step: 1, unit_of_measurement: s } }
 
+    # --- Debug ---
+    debug_mode:
+      name: Debug-Meldungen (Benachrichtigungen)
+      default: false
+      selector: { boolean: {} }
+
 mode: restart
 max_exceeded: silent
 
@@ -224,14 +231,8 @@ variables:
   v_d_thresh_m: !input distance_turn_on_below_m
   v_d_wait_s: !input distance_wait_timeout_s
 
-  # Helper: Zustände
-  s_motion_on: "{{ is_state(v_motion, 'on') }}"
-  s_presence_active: "{{ (states(v_presence) | float(0)) >= (v_p_thresh | float(1)) }}"
-  s_presence_below: "{{ (states(v_presence) | float(0)) < (v_p_thresh | float(1)) }}"
-
-  # ON-Freigabe je Auswahl
-  s_on_ok: >
-    {{ (use_motion_on and s_motion_on) or (use_presence_on and s_presence_active) }}
+  # Debug
+  v_debug: !input debug_mode
 
   # Zeitfenster inkl. über Mitternacht
   in_window_mo: >
@@ -255,6 +256,7 @@ variables:
     {% set e = as_timestamp(today_at(v_t_ni_e)) %}
     {{ (s <= e and s <= now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
 
+  # Ergebnis-Helligkeit
   v_brightness_now: >
     {% if v_bright_mode == 'fixed' %}
       {{ v_bright_fixed | int }}
@@ -283,10 +285,13 @@ variables:
   s_distance_ok: "{{ (not s_distance_available) or (s_distance_m < (v_d_thresh_m | float(5))) }}"
 
 trigger:
-  - platform: state
+  - id: motion_on
+    platform: state
     entity_id: !input motion_sensor
     to: 'on'
-  - platform: numeric_state
+
+  - id: presence_active
+    platform: numeric_state
     entity_id: !input presence_sensor
     above: !input presence_active_threshold
 
@@ -303,7 +308,7 @@ condition:
       {% if v_dark_mode == 'none' %}
         true
       {% elif v_dark_mode == 'sun' %}
-        {{ is_state('sun.sun','below_horizon') }}
+        {{ is_state('sun.sun', 'below_horizon') }}
       {% else %}
         {% if v_lux_entity in [None, '', []] %}
           false
@@ -313,22 +318,25 @@ condition:
       {% endif %}
 
 action:
-  # Guard: mind. eine AN-Quelle aktiviert?
+  # Sicherstellen, dass mind. eine AN-Quelle erlaubt ist
   - choose:
       - conditions: "{{ not (use_motion_on or use_presence_on) }}"
         sequence:
-          - service: persistent_notification.create
-            data:
-              title: "Flur – Auswahl prüfen"
-              message: "Keine AN-Quelle aktiviert (Bewegung/Präsenz). Aktion beendet."
+          - choose:
+              - conditions: "{{ v_debug }}"
+                sequence:
+                  - service: persistent_notification.create
+                    data:
+                      title: "Flur – Auswahl prüfen"
+                      message: "Keine AN-Quelle aktiviert (Bewegung/Präsenz)."
           - stop: "Keine AN-Quelle aktiv"
     default: []
 
-  # Einschalten nur, wenn gewählte Quellen aktuell zutreffen
+  # Je nach Trigger-ID und Auswahl einschalten
   - choose:
-      - conditions: "{{ s_on_ok }}"
+      # Bewegung löst ein, wenn erlaubt
+      - conditions: "{{ trigger.id == 'motion_on' and use_motion_on }}"
         sequence:
-          # Distanz-Gate (optional)
           - choose:
               - conditions: "{{ s_distance_available and not s_distance_ok }}"
                 sequence:
@@ -338,13 +346,17 @@ action:
                   - choose:
                       - conditions: "{{ not s_distance_ok }}"
                         sequence:
-                          - stop: "Abbruch: Distanz ≥ Schwelle (Gate aktiv)"
+                          - choose:
+                              - conditions: "{{ v_debug }}"
+                                sequence:
+                                  - service: persistent_notification.create
+                                    data:
+                                      title: "Flur – gestoppt"
+                                      message: "Distanz ≥ Schwelle; Gate aktiv."
+                          - stop: "Distanz-Gate blockiert"
             default: []
-
-          # Licht einschalten (ggf. mit Helligkeit)
           - service: light.turn_on
-            target:
-              entity_id: !input target_lights
+            target: { entity_id: !input target_lights }
             data: >
               {% set d = {} %}
               {% if v_bright_mode == 'fixed' %}
@@ -353,14 +365,55 @@ action:
                 {% set _ = d.update({'brightness_pct': (v_brightness_now | int) }) %}
               {% endif %}
               {{ d }}
-    default: []
 
-  # Ausschaltbedingung nach gewählter Off-Logik
+      # Präsenz löst ein, wenn erlaubt
+      - conditions: "{{ trigger.id == 'presence_active' and use_presence_on }}"
+        sequence:
+          - choose:
+              - conditions: "{{ s_distance_available and not s_distance_ok }}"
+                sequence:
+                  - wait_template: "{{ s_distance_ok }}"
+                    timeout: "00:00:{{ v_d_wait_s | int }}"
+                    continue_on_timeout: true
+                  - choose:
+                      - conditions: "{{ not s_distance_ok }}"
+                        sequence:
+                          - choose:
+                              - conditions: "{{ v_debug }}"
+                                sequence:
+                                  - service: persistent_notification.create
+                                    data:
+                                      title: "Flur – gestoppt"
+                                      message: "Distanz ≥ Schwelle; Gate aktiv."
+                          - stop: "Distanz-Gate blockiert"
+            default: []
+          - service: light.turn_on
+            target: { entity_id: !input target_lights }
+            data: >
+              {% set d = {} %}
+              {% if v_bright_mode == 'fixed' %}
+                {% set _ = d.update({'brightness_pct': (v_bright_fixed | int) }) %}
+              {% elif v_bright_mode == 'schedule' %}
+                {% set _ = d.update({'brightness_pct': (v_brightness_now | int) }) %}
+              {% endif %}
+              {{ d }}
+
+    default:
+      - choose:
+          - conditions: "{{ v_debug }}"
+            sequence:
+              - service: persistent_notification.create
+                data:
+                  title: "Flur – kein Einschaltpfad"
+                  message: "Trigger '{{ trigger.id }}' ist nicht zur AN-Quelle freigegeben."
+        default: []
+
+  # Ausschalten nach gewählter Logik
   - wait_for_trigger:
       - platform: template
         value_template: >
           {% set motion_off = is_state(v_motion, 'off') %}
-          {% set pres_below = s_presence_below %}
+          {% set pres_below = (states(v_presence) | float(0)) < (v_p_thresh | float(1)) %}
           {% set base =
             (v_off_logic == 'both_absent' and motion_off and pres_below) or
             (v_off_logic == 'presence_only' and pres_below) or
