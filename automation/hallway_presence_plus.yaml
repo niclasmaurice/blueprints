@@ -1,15 +1,15 @@
 blueprint:
-  name: Flur – Bewegung + Präsenz (Meross) + Zeit-Helligkeit + Distanz
+  name: Flur – Bewegung + Präsenz (Meross) + Zeit-Helligkeit + Distanz + Auswahl
   description: >
-    Schaltet das Licht bei Bewegung/Präsenz ein und hält es an, solange Präsenz erkannt wird.
-    Schaltet erst aus, wenn Präsenz UND Bewegung für eine einstellbare Zeit abwesend sind.
-    Optional nur bei Dunkelheit (Sonne oder Lux). Mit Sperre (Bypass).
-    Zusätzlich: Helligkeit je nach Uhrzeit; Einschalten erst wenn Distanz < Schwelle (optional).
+    Schaltet das Licht bei Bewegung/Präsenz ein (quellen-selektiv) und hält es an, solange Präsenz erkannt wird.
+    Ausschalten nach wählbarer Abwesenheitslogik. Optional nur bei Dunkelheit (Sonne/Lux).
+    Zeitabhängige Helligkeit (fest/Profil). Distanz-Gate optional zuschaltbar. Mit Bypass.
   domain: automation
+
   input:
+    # --- Sensoren ---
     motion_sensor:
       name: Bewegungsmelder
-      description: "Binary Sensor für Bewegung"
       selector:
         entity:
           domain: binary_sensor
@@ -17,45 +17,53 @@ blueprint:
 
     presence_sensor:
       name: Präsenzsensor (numerisch)
-      description: "Numerischer Präsenz-Wert (Meross)."
       selector:
         entity:
           domain: sensor
 
     presence_active_threshold:
       name: Präsenz gilt ab Wert ≥
-      description: "Ab welchem Wert gilt „anwesend“"
       default: 1
-      selector:
-        number:
-          min: 0
-          max: 10
-          step: 1
-          mode: slider
+      selector: { number: { min: 0, max: 10, step: 1, mode: slider } }
 
     target_lights:
       name: Licht(er)
-      description: "Zu schaltende Lampen"
       selector:
         entity:
           domain: light
           multiple: true
 
-    off_delay:
-      name: Ausschaltverzögerung bei Abwesenheit (Sekunden)
-      description: "So lange müssen Bewegung=aus UND Präsenz < Schwellwert anliegen"
-      default: 15
-      selector:
-        number:
-          min: 5
-          max: 900
-          step: 1
-          unit_of_measurement: s
-          mode: slider
+    # --- Ein-/Aus-Logik konfigurierbar ---
+    use_motion_for_on:
+      name: Bewegung für AN verwenden?
+      default: true
+      selector: { boolean: {} }
 
+    use_presence_for_on:
+      name: Präsenz für AN verwenden?
+      default: true
+      selector: { boolean: {} }
+
+    off_logic:
+      name: AUS-Logik
+      description: "Welche Abwesenheit führt zum Ausschalten?"
+      default: both_absent
+      selector:
+        select:
+          options:
+            - { label: "both_absent (Bewegung AUS UND Präsenz < Schwelle)", value: both_absent }
+            - { label: "presence_only (nur Präsenz < Schwelle)", value: presence_only }
+            - { label: "motion_only (nur alle Bewegung AUS)", value: motion_only }
+            - { label: "either_absent (Bewegung AUS ODER Präsenz < Schwelle)", value: either_absent }
+
+    off_delay:
+      name: Ausschaltverzögerung (Sek.)
+      default: 15
+      selector: { number: { min: 5, max: 900, step: 1, unit_of_measurement: s, mode: slider } }
+
+    # --- Dunkelheit ---
     dark_condition:
       name: Dunkelheitsbedingung
-      description: "Wann darf eingeschaltet werden?"
       default: none
       selector:
         select:
@@ -65,7 +73,7 @@ blueprint:
             - { label: "Lux unter Schwelle", value: lux }
 
     illuminance_sensor:
-      name: Helligkeitssensor (Lux, optional – nur wenn „Lux unter Schwelle“)
+      name: Helligkeitssensor (Lux, optional – nur bei „Lux“)
       default: []
       selector:
         entity:
@@ -75,16 +83,10 @@ blueprint:
     illuminance_below:
       name: Lux-Schwelle
       default: 30
-      selector:
-        number:
-          min: 0
-          max: 5000
-          step: 1
-          mode: slider
+      selector: { number: { min: 0, max: 5000, step: 1, mode: slider } }
 
     bypass_helper:
       name: Sperre (input_boolean, optional)
-      description: "Wenn EIN, macht die Automation nichts."
       default: []
       selector:
         entity:
@@ -93,136 +95,94 @@ blueprint:
     # --- Helligkeit nach Uhrzeit ---
     brightness_mode:
       name: Helligkeitsmodus
-      description: "Keine Vorgabe, fester Wert oder Zeitprofil (Morgen/Tag/Abend/Nacht)"
       default: none
       selector:
         select:
           options:
             - { label: "Keine (Lampe behält letzte Helligkeit)", value: none }
-            - { label: "Fest (ein Wert für alle Zeiten)", value: fixed }
+            - { label: "Fest (ein Wert)", value: fixed }
             - { label: "Zeitprofil (Morgen/Tag/Abend/Nacht)", value: schedule }
 
     brightness_fixed_pct:
       name: Feste Helligkeit (%)
-      description: "Nur bei Modus „Fest“"
       default: 100
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          unit_of_measurement: "%"
+      selector: { number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" } }
 
     time_morning_start:
       name: Morgen – Start
       default: "06:30:00"
       selector: { time: {} }
-
     time_morning_end:
       name: Morgen – Ende
       default: "09:30:00"
       selector: { time: {} }
-
     brightness_morning_pct:
       name: Morgen – Helligkeit (%)
       default: 60
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          unit_of_measurement: "%"
+      selector: { number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" } }
 
     time_day_start:
       name: Tag – Start
       default: "09:30:00"
       selector: { time: {} }
-
     time_day_end:
       name: Tag – Ende
       default: "18:00:00"
       selector: { time: {} }
-
     brightness_day_pct:
       name: Tag – Helligkeit (%)
       default: 100
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          unit_of_measurement: "%"
+      selector: { number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" } }
 
     time_evening_start:
       name: Abend – Start
       default: "18:00:00"
       selector: { time: {} }
-
     time_evening_end:
       name: Abend – Ende
       default: "22:00:00"
       selector: { time: {} }
-
     brightness_evening_pct:
       name: Abend – Helligkeit (%)
       default: 70
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          unit_of_measurement: "%"
+      selector: { number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" } }
 
     time_night_start:
       name: Nacht – Start
       default: "22:00:00"
       selector: { time: {} }
-
     time_night_end:
       name: Nacht – Ende
       default: "06:30:00"
       selector: { time: {} }
-
     brightness_night_pct:
       name: Nacht – Helligkeit (%)
       default: 20
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          unit_of_measurement: "%"
+      selector: { number: { min: 1, max: 100, step: 1, unit_of_measurement: "%" } }
 
-    # --- Distanz-Gate (optional) ---
+    # --- Distanz-Gate (optional zuschaltbar) ---
+    enable_distance_gate:
+      name: Distanz-Gate aktiv?
+      default: false
+      selector: { boolean: {} }
+
     distance_sensor:
       name: Distanzsensor (optional)
-      description: "Numerischer Abstand, z. B. Meross „Presence distance“."
-      default: []
+      description: "z. B. Meross „Presence distance“ (m oder cm)."
+      default: null
       selector:
         entity:
           domain: sensor
 
     distance_turn_on_below_m:
       name: Einschalten erst unter Distanz (m)
-      description: "Lampe erst einschalten, wenn Distanz < X m liegt."
       default: 5
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 0.1
-          unit_of_measurement: m
+      selector: { number: { min: 0, max: 30, step: 0.1, unit_of_measurement: m } }
 
     distance_wait_timeout_s:
       name: Maximale Wartezeit auf Distanz (Sek.)
-      description: "Wie lange auf Distanz < X m warten, bevor abgebrochen wird."
       default: 3
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 1
-          unit_of_measurement: s
+      selector: { number: { min: 0, max: 30, step: 1, unit_of_measurement: s } }
 
 mode: restart
 max_exceeded: silent
@@ -237,6 +197,10 @@ variables:
   v_lux_thresh: !input illuminance_below
   v_bypass: !input bypass_helper
   v_lights: !input target_lights
+
+  use_motion_on: !input use_motion_for_on
+  use_presence_on: !input use_presence_for_on
+  v_off_logic: !input off_logic
 
   # Zeit-Helligkeit
   v_bright_mode: !input brightness_mode
@@ -255,11 +219,21 @@ variables:
   v_b_ni: !input brightness_night_pct
 
   # Distanz
+  v_dist_enabled: !input enable_distance_gate
   v_d_entity: !input distance_sensor
   v_d_thresh_m: !input distance_turn_on_below_m
   v_d_wait_s: !input distance_wait_timeout_s
 
-  # Zeit-Fenster inkl. über Mitternacht
+  # Helper: Zustände
+  s_motion_on: "{{ is_state(v_motion, 'on') }}"
+  s_presence_active: "{{ (states(v_presence) | float(0)) >= (v_p_thresh | float(1)) }}"
+  s_presence_below: "{{ (states(v_presence) | float(0)) < (v_p_thresh | float(1)) }}"
+
+  # ON-Freigabe je Auswahl
+  s_on_ok: >
+    {{ (use_motion_on and s_motion_on) or (use_presence_on and s_presence_active) }}
+
+  # Zeitfenster inkl. über Mitternacht
   in_window_mo: >
     {% set now_ts = as_timestamp(now()) %}
     {% set s = as_timestamp(today_at(v_t_mo_s)) %}
@@ -281,7 +255,6 @@ variables:
     {% set e = as_timestamp(today_at(v_t_ni_e)) %}
     {{ (s <= e and s <= now_ts < e) or (s > e and (now_ts >= s or now_ts < e)) }}
 
-  # Ergebnis-Helligkeit
   v_brightness_now: >
     {% if v_bright_mode == 'fixed' %}
       {{ v_bright_fixed | int }}
@@ -292,29 +265,22 @@ variables:
       {% elif in_window_ni %} {{ v_b_ni | int }}
       {% else %} {{ v_b_da | int }}
       {% endif %}
-    {% else %}
-      {{ 0 }}
-    {% endif %}
+    {% else %} 0 {% endif %}
 
-  # Distanz-Auswertung (in Meter normalisiert)
+  # Distanz (Meter, robust)
   s_distance_available: >
-    {{ not (v_d_entity in [None, '', []]) and (states.get(v_d_entity) is not none) }}
+    {{ v_dist_enabled and v_d_entity not in [None, '', []] and (states.get(v_d_entity) is not none) }}
   s_distance_m: >
-    {% if not (not (v_d_entity in [None, '', []]) or (states.get(v_d_entity) is none)) %}
-      9999
+    {% if not (v_dist_enabled and v_d_entity and states.get(v_d_entity)) %}
+      0
     {% else %}
       {% set raw = states(v_d_entity) | float(9999) %}
       {% set u = (state_attr(v_d_entity, 'unit_of_measurement') or '') | lower %}
-      {% if u in ['m', 'meter', 'meters'] %}
-        {{ raw }}
-      {% elif u in ['cm', 'centimeter', 'centimeters'] %}
-        {{ raw / 100 }}
-      {% else %}
-        {{ raw }}  {# Fallback: annehmen m #}
+      {% if 'cm' in u %} {{ raw / 100 }}
+      {% else %} {{ raw }}
       {% endif %}
     {% endif %}
-  s_distance_ok: >
-    {{ (not s_distance_available) or (s_distance_m < (v_d_thresh_m | float(5))) }}
+  s_distance_ok: "{{ (not s_distance_available) or (s_distance_m < (v_d_thresh_m | float(5))) }}"
 
 trigger:
   - platform: state
@@ -331,7 +297,6 @@ condition:
       {% if v_bypass in [None, '', []] %} true
       {% else %} {{ is_state(v_bypass, 'off') }}
       {% endif %}
-
   # Dunkelheit
   - condition: template
     value_template: >
@@ -348,34 +313,61 @@ condition:
       {% endif %}
 
 action:
-  # Optional warten, bis Distanz < Schwelle (nur wenn Sensor gesetzt)
+  # Guard: mind. eine AN-Quelle aktiviert?
   - choose:
-      - conditions: "{{ s_distance_available and not s_distance_ok }}"
+      - conditions: "{{ not (use_motion_on or use_presence_on) }}"
         sequence:
-          - wait_template: "{{ s_distance_ok }}"
-            timeout: "00:00:{{ v_d_wait_s | int }}"
-            continue_on_timeout: false
+          - service: persistent_notification.create
+            data:
+              title: "Flur – Auswahl prüfen"
+              message: "Keine AN-Quelle aktiviert (Bewegung/Präsenz). Aktion beendet."
+          - stop: "Keine AN-Quelle aktiv"
     default: []
 
-  # Einschalten (mit optionaler Helligkeit nach Modus)
-  - service: light.turn_on
-    target:
-      entity_id: !input target_lights
-    data: >
-      {% set d = {} %}
-      {% if v_bright_mode == 'fixed' %}
-        {% set _ = d.update({'brightness_pct': (v_bright_fixed | int) }) %}
-      {% elif v_bright_mode == 'schedule' %}
-        {% set _ = d.update({'brightness_pct': (v_brightness_now | int) }) %}
-      {% endif %}
-      {{ d }}
+  # Einschalten nur, wenn gewählte Quellen aktuell zutreffen
+  - choose:
+      - conditions: "{{ s_on_ok }}"
+        sequence:
+          # Distanz-Gate (optional)
+          - choose:
+              - conditions: "{{ s_distance_available and not s_distance_ok }}"
+                sequence:
+                  - wait_template: "{{ s_distance_ok }}"
+                    timeout: "00:00:{{ v_d_wait_s | int }}"
+                    continue_on_timeout: true
+                  - choose:
+                      - conditions: "{{ not s_distance_ok }}"
+                        sequence:
+                          - stop: "Abbruch: Distanz ≥ Schwelle (Gate aktiv)"
+            default: []
 
-  # Warten bis *gleichzeitig* keine Bewegung ist *und* Präsenz < Schwellwert
+          # Licht einschalten (ggf. mit Helligkeit)
+          - service: light.turn_on
+            target:
+              entity_id: !input target_lights
+            data: >
+              {% set d = {} %}
+              {% if v_bright_mode == 'fixed' %}
+                {% set _ = d.update({'brightness_pct': (v_bright_fixed | int) }) %}
+              {% elif v_bright_mode == 'schedule' %}
+                {% set _ = d.update({'brightness_pct': (v_brightness_now | int) }) %}
+              {% endif %}
+              {{ d }}
+    default: []
+
+  # Ausschaltbedingung nach gewählter Off-Logik
   - wait_for_trigger:
       - platform: template
         value_template: >
-          {{ is_state(v_motion, 'off')
-             and (states(v_presence) | float(0)) < (v_p_thresh | float(1)) }}
+          {% set motion_off = is_state(v_motion, 'off') %}
+          {% set pres_below = s_presence_below %}
+          {% set base =
+            (v_off_logic == 'both_absent' and motion_off and pres_below) or
+            (v_off_logic == 'presence_only' and pres_below) or
+            (v_off_logic == 'motion_only' and motion_off) or
+            (v_off_logic == 'either_absent' and (motion_off or pres_below))
+          %}
+          {{ base }}
         for:
           seconds: !input off_delay
     continue_on_timeout: false
