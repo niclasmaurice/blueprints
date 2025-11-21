@@ -1,0 +1,66 @@
+blueprint:
+  name: Klimasteuerung basierend auf Anwesenheit
+  description: Passt die Klimaanlage/Heizung basierend auf der Anwesenheit an.
+  domain: automation
+  input:
+    presence_entity:
+      name: Anwesenheitssensor
+      description: Der Sensor oder die Gruppe, die die Anwesenheit überwacht
+      selector:
+        entity:
+          domain:
+            - person
+            - device_tracker
+            - binary_sensor
+            - group
+    climate_entity:
+      name: Klimagerät
+      description: Das Klimagerät, das gesteuert werden soll
+      selector:
+        entity:
+          domain: climate
+    home_temperature:
+      name: Temperatur bei Anwesenheit
+      description: Die gewünschte Temperatur, wenn jemand zu Hause ist
+      default: 21
+      selector:
+        number:
+          min: 15
+          max: 30
+          unit_of_measurement: "°C"
+    away_temperature:
+      name: Temperatur bei Abwesenheit
+      description: Die gewünschte Temperatur, wenn niemand zu Hause ist
+      default: 18
+      selector:
+        number:
+          min: 15
+          max: 30
+          unit_of_measurement: "°C"
+
+trigger:
+  - platform: state
+    entity_id: !input presence_entity
+
+action:
+  - choose:
+      - conditions:
+          - condition: state
+            entity_id: !input presence_entity
+            state: "home"
+        sequence:
+          - service: climate.set_temperature
+            target:
+              entity_id: !input climate_entity
+            data:
+              temperature: !input home_temperature
+      - conditions:
+          - condition: state
+            entity_id: !input presence_entity
+            state: "not_home"
+        sequence:
+          - service: climate.set_temperature
+            target:
+              entity_id: !input climate_entity
+            data:
+              temperature: !input away_temperature
